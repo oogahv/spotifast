@@ -652,6 +652,7 @@ fn full_window(
     windows_buttons(app, view);
     transport(app, view, now);
     shuffle_repeat(app, view, now);
+    like_button(app, view, now);
     if view
         .interact(layout::ABOUT, "about", Sense::click())
         .on_hover_text(super::keys::platform_shortcut(
@@ -664,6 +665,88 @@ fn full_window(
     }
 
     vis_moving
+}
+
+/// A heart, nine skin pixels wide, as rows of (start, length) runs.
+const HEART: [&[(u32, u32)]; 8] = [
+    &[(1, 2), (6, 2)],
+    &[(0, 4), (5, 4)],
+    &[(0, 9)],
+    &[(0, 9)],
+    &[(1, 7)],
+    &[(2, 5)],
+    &[(3, 3)],
+    &[(4, 1)],
+];
+/// The heart's outline: the cells of `HEART` with a neighbour outside it.
+const HEART_EDGE: [&[u32]; 8] = [
+    &[1, 2, 6, 7],
+    &[0, 3, 5, 8],
+    &[0, 4, 8],
+    &[0, 8],
+    &[1, 7],
+    &[2, 6],
+    &[3, 5],
+    &[4],
+];
+/// Where the heart sits: the gap between the repeat button and the logo,
+/// which classic skins leave empty.
+const LIKE: Area = Area::new(241, 92, 9, 8);
+const LIKED: Color32 = Color32::from_rgb(0x1e, 0xd7, 0x60);
+const NOT_LIKED: Color32 = Color32::from_rgb(0xa0, 0xa0, 0xa0);
+const LIKE_HOVER: Color32 = Color32::from_rgb(0xe8, 0xe8, 0xe8);
+const LIKE_SHADOW: Color32 = Color32::from_rgb(0x10, 0x10, 0x10);
+
+/// The like button: a filled green heart for a liked song, an outline for
+/// one that is not. A click likes or unlikes the playing song on Spotify,
+/// as **B** does.
+fn like_button(app: &mut App, view: &mut View, now: Option<&NowPlaying>) {
+    let Some(now) = now.filter(|now| !now.is_episode) else {
+        return;
+    };
+    let liked = app.is_saved(&now.uri) == Some(true);
+    let hit = Area::new(LIKE.x - 2, LIKE.y - 2, LIKE.width + 4, LIKE.height + 4);
+    let response = view
+        .interact(hit, "like", Sense::click())
+        .on_hover_text(if liked {
+            gettext(app.locale, "Remove from Liked Songs (B)")
+        } else {
+            gettext(app.locale, "Save to Liked Songs (B)")
+        });
+    let colour = match (liked, response.hovered()) {
+        (true, _) => LIKED,
+        (false, true) => LIKE_HOVER,
+        (false, false) => NOT_LIKED,
+    };
+    // A shadow one pixel down and right keeps the heart readable on light
+    // skins as well as dark ones.
+    for row in 0..HEART.len() {
+        let y = LIKE.y + row as u32 + 1;
+        if liked {
+            for &(start, length) in HEART[row] {
+                view.fill(LIKE.x + start + 1, y, length, 1, LIKE_SHADOW);
+            }
+        } else {
+            for &x in HEART_EDGE[row] {
+                view.fill(LIKE.x + x + 1, y, 1, 1, LIKE_SHADOW);
+            }
+        }
+    }
+    for (row, cells) in HEART_EDGE.iter().enumerate() {
+        let y = LIKE.y + row as u32;
+        if liked {
+            for &(start, length) in HEART[row] {
+                view.fill(LIKE.x + start, y, length, 1, colour);
+            }
+        } else {
+            for &x in *cells {
+                view.fill(LIKE.x + x, y, 1, 1, colour);
+            }
+        }
+    }
+    if response.clicked() {
+        app.actions.push(Action::ToggleSaved(now.uri.clone()));
+    }
 }
 
 /// The main window rolled up: the bar with the time in the small font,
@@ -1797,6 +1880,30 @@ fn shuffle_repeat(app: &mut App, view: &mut View, now: Option<&NowPlaying>) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_hearts_outline_is_its_edge() {
+        let inside = |x: i32, y: i32| {
+            y >= 0
+                && (y as usize) < super::HEART.len()
+                && super::HEART[y as usize]
+                    .iter()
+                    .any(|&(start, length)| x >= start as i32 && x < (start + length) as i32)
+        };
+        for (y, edge) in super::HEART_EDGE.iter().enumerate() {
+            let y = y as i32;
+            let wanted: Vec<u32> = (0..9)
+                .filter(|&x| {
+                    inside(x, y)
+                        && [(-1, 0), (1, 0), (0, -1), (0, 1)]
+                            .iter()
+                            .any(|(dx, dy)| !inside(x + dx, y + dy))
+                })
+                .map(|x| x as u32)
+                .collect();
+            assert_eq!(*edge, wanted.as_slice(), "row {y}");
+        }
+    }
+
     #[test]
     fn a_free_window_fills_its_width_and_milkdrop_its_height() {
         let base = layout::WINDOW_HEIGHT + layout::PLAYLIST_MIN_HEIGHT;
