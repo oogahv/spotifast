@@ -189,6 +189,19 @@ pub(crate) fn free_layout(size: Vec2, base: u32, milkdrop: bool) -> FreeLayout {
     }
 }
 
+/// Moves the window with the pointer, unless it is docked to a screen edge,
+/// where it stays put.
+pub(super) fn start_drag(ctx: &egui::Context) {
+    if !docked(ctx) {
+        ctx.send_viewport_cmd(ViewportCommand::StartDrag);
+    }
+}
+
+fn docked(ctx: &egui::Context) -> bool {
+    ctx.data(|data| data.get_temp::<bool>(Id::new("winamp-docked")))
+        .unwrap_or(false)
+}
+
 /// Lets the window resize, maximize and snap, or locks it to the skin
 /// again, once per change.
 fn free_window(ctx: &egui::Context, free: bool) {
@@ -230,7 +243,14 @@ fn remember_free_size(app: &mut App, ctx: &egui::Context, size: Vec2) {
 
 /// Invisible strips along a free-size window's edges and corners that
 /// resize it. A borderless window has no frame of its own to grab.
-fn resize_edges(ui: &mut Ui, ctx: &egui::Context, area: Rect) {
+/// Docked, only the edge away from the screen's resizes it.
+fn resize_edges(
+    ui: &mut Ui,
+    ctx: &egui::Context,
+    area: Rect,
+    dock: Option<crate::appbar::DockEdge>,
+) {
+    use crate::appbar::DockEdge;
     use egui::{CursorIcon as C, ResizeDirection as D};
     let (e, c) = (FREE_EDGE, FREE_EDGE * 2.0);
     let (l, t, r, b) = (area.left(), area.top(), area.right(), area.bottom());
@@ -277,6 +297,14 @@ fn resize_edges(ui: &mut Ui, ctx: &egui::Context, area: Rect) {
         ),
     ];
     for (index, (rect, direction, cursor)) in zones.into_iter().enumerate() {
+        let allowed = match dock {
+            None | Some(DockEdge::Off) => true,
+            Some(DockEdge::Left) => direction == D::East,
+            Some(DockEdge::Right) => direction == D::West,
+        };
+        if !allowed {
+            continue;
+        }
         let response = ui
             .interact(rect, Id::new(("winamp-free-edge", index)), Sense::drag())
             .on_hover_cursor(cursor);
@@ -501,7 +529,13 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         wmp::show(app, ui);
         return;
     }
-    let free = app.settings.winamp_free_size;
+    let free = app.settings.winamp_free_size || app.winamp_docks();
+    let dock = app
+        .winamp
+        .dock
+        .is_docked()
+        .then_some(app.settings.winamp_dock);
+    ctx.data_mut(|data| data.insert_temp(Id::new("winamp-docked"), dock.is_some()));
     free_window(&ctx, free);
     let area = ctx.viewport_rect();
     let (unit, origin, free_panel) = if free {
@@ -617,7 +651,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
 
     // Last, so the edges win over the skin's own buttons under them.
     if free {
-        resize_edges(view.ui, &ctx, area);
+        resize_edges(view.ui, &ctx, area, dock);
     }
 
     if vis_moving {
@@ -774,7 +808,7 @@ fn shade_bar(
         Sense::click_and_drag(),
     );
     if title.drag_started() {
-        ctx.send_viewport_cmd(ViewportCommand::StartDrag);
+        start_drag(ctx);
     }
     if title.double_clicked() {
         app.actions.push(Action::ToggleWinampShade);
@@ -941,7 +975,7 @@ fn title_bar(app: &mut App, view: &mut View, ctx: &egui::Context, focused: bool)
     view.sprite(bar, layout::TITLE_BAR);
     let title = view.interact(layout::TITLE_BAR, "title", Sense::click_and_drag());
     if title.drag_started() {
-        ctx.send_viewport_cmd(ViewportCommand::StartDrag);
+        start_drag(ctx);
     }
     if title.double_clicked() {
         app.actions.push(Action::ToggleWinampShade);

@@ -357,6 +357,8 @@ struct Immersive {
 }
 
 pub struct App {
+    /// The open window's native handle (Windows `HWND`), for docking it.
+    pub native_window: Option<isize>,
     pub dirs: AppDirs,
     pub(crate) storage_usage: crate::storage::Usage,
     pub(crate) clearing_audio_cache: bool,
@@ -1218,6 +1220,7 @@ impl App {
             last_proxy_applied: 0,
             proxy_form_edited: false,
             settings_dirty: false,
+            native_window: None,
             last_settings_save: Instant::now(),
             backend,
             media_controls,
@@ -1628,6 +1631,8 @@ impl App {
     /// The window is gone but the process stays: audio, the tray, and the
     /// media controls keep running until Show or Quit.
     pub fn window_gone(&mut self) {
+        self.winamp.dock.release();
+        self.native_window = None;
         self.forget_skin_textures();
         self.window_hidden = true;
         self.hide_intent = false;
@@ -14393,6 +14398,7 @@ impl App {
         self.sync_media_controls(ctx);
         self.sync_window_title(ctx);
         self.remember_geometry(ctx);
+        self.sync_dock(ctx);
         #[cfg(target_os = "macos")]
         self.sync_notch_widget(ctx);
         #[cfg(target_os = "macos")]
@@ -14412,6 +14418,28 @@ impl App {
         if close_requested && !self.quit_requested && !self.switch_intent && hides_to_tray {
             self.hide_intent = true;
         }
+    }
+
+    /// Whether the mini player should be docked to a screen edge now: a
+    /// classic skin, visible, on a platform that docks.
+    pub fn winamp_docks(&self) -> bool {
+        crate::appbar::SUPPORTED
+            && !self.settings.winamp_dock.is_off()
+            && self.settings.winamp_window
+            && self.winamp.skin.wmp.is_none()
+    }
+
+    /// Keeps the docked strip as wide as the window, on the window's
+    /// monitor, or gives it back.
+    fn sync_dock(&mut self, ctx: &egui::Context) {
+        let wanted = self.winamp_docks() && !self.window_hidden && !self.switch_intent;
+        let edge = if wanted {
+            self.settings.winamp_dock
+        } else {
+            crate::appbar::DockEdge::Off
+        };
+        let width = (ctx.viewport_rect().width() * ctx.pixels_per_point()).round() as i32;
+        self.winamp.dock.sync(self.native_window, edge, width);
     }
 
     /// Follows the open window's size, position and maximized state, so the

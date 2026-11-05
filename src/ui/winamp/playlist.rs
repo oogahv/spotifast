@@ -49,9 +49,7 @@ pub(super) fn show(app: &mut App, view: &mut View, now: Option<&NowPlaying>, foc
         Sense::click_and_drag(),
     );
     if title.drag_started() {
-        view.ui
-            .ctx()
-            .send_viewport_cmd(egui::ViewportCommand::StartDrag);
+        super::start_drag(view.ui.ctx());
     }
     if view
         .lamp_button(
@@ -150,9 +148,7 @@ fn shade(app: &mut App, view: &mut View, now: Option<&NowPlaying>, focused: bool
         Sense::click_and_drag(),
     );
     if title.drag_started() {
-        view.ui
-            .ctx()
-            .send_viewport_cmd(egui::ViewportCommand::StartDrag);
+        super::start_drag(view.ui.ctx());
     }
     if let Some(now) = now {
         let time = util::format_duration_ms(now.position_ms);

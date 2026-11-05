@@ -3,6 +3,7 @@
 pub mod account_cache;
 pub mod api;
 pub mod app;
+pub mod appbar;
 #[cfg(target_os = "linux")]
 pub mod appearance;
 pub mod auth;

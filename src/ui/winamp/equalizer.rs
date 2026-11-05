@@ -42,9 +42,7 @@ pub(super) fn show(app: &mut App, view: &mut View, now: Option<&NowPlaying>, foc
     view.sprite(bar, layout::EQ_TITLE_BAR);
     let title = view.interact(layout::EQ_TITLE_BAR, "eq-title", Sense::click_and_drag());
     if title.drag_started() {
-        view.ui
-            .ctx()
-            .send_viewport_cmd(egui::ViewportCommand::StartDrag);
+        super::start_drag(view.ui.ctx());
     }
     if title.double_clicked() {
         app.actions.push(Action::ToggleWinampEqShade);
@@ -133,9 +131,7 @@ fn shade(app: &mut App, view: &mut View, now: Option<&NowPlaying>, focused: bool
     view.sprite(bar, area);
     let title = view.interact(area, "eq-shade-title", Sense::click_and_drag());
     if title.drag_started() {
-        view.ui
-            .ctx()
-            .send_viewport_cmd(egui::ViewportCommand::StartDrag);
+        super::start_drag(view.ui.ctx());
     }
     if title.double_clicked() {
         app.actions.push(Action::ToggleWinampEqShade);

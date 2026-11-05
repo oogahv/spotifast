@@ -59,7 +59,7 @@ pub(super) fn show(app: &mut App, view: &mut View, focused: bool, height: u32, g
     let bar = Area::new(0, 0, width, generic::TOP_HEIGHT);
     let title = view.interact(bar, "milkdrop-title", Sense::click_and_drag());
     if title.drag_started() {
-        ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
+        super::start_drag(&ctx);
     }
     if title.double_clicked() {
         app.actions.push(Action::MilkdropFullscreen);

@@ -171,6 +171,8 @@ pub struct WinampState {
     pub playlist_text: crate::ui::winamp::PixelText,
     /// MilkDrop presets listed and downloaded from Settings.
     pub presets: crate::milkdrop::Presets,
+    /// The mini player's strip at a screen edge, when docked.
+    pub dock: crate::appbar::Dock,
 }
 
 impl WinampState {
@@ -217,6 +219,7 @@ impl WinampState {
             milkdrop_resize: 0.0,
             playlist_text: crate::ui::winamp::PixelText::default(),
             presets: crate::milkdrop::Presets::new(),
+            dock: crate::appbar::Dock::default(),
         }
     }
 

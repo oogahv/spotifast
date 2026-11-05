@@ -424,6 +424,10 @@ pub struct Settings {
     /// MilkDrop panel fills the height left over.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub winamp_free_size: bool,
+    /// Windows: the mini player docks to this screen edge like the taskbar,
+    /// and other windows keep to the rest of the screen.
+    #[serde(default, skip_serializing_if = "crate::appbar::DockEdge::is_off")]
+    pub winamp_dock: crate::appbar::DockEdge,
     /// The free-size window's last size in logical points.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub winamp_free_window: Option<[f32; 2]>,
@@ -610,6 +614,7 @@ impl Default for Settings {
             lyrics_milkdrop: false,
             winamp_free_size: false,
             winamp_free_window: None,
+            winamp_dock: crate::appbar::DockEdge::Off,
             visualize_source: VisSource::Player,
             visualize_app: default_visualize_app(),
             milkdrop_size: crate::milkdrop::DEFAULT_SIZE,

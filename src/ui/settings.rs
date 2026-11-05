@@ -1875,6 +1875,14 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
             ),
         ),
         RowText::new(
+            gettext(locale, "Dock to screen edge"),
+            gettext(
+                locale,
+                "Keep a Winamp skin docked at the left or right of the screen, the way the taskbar is. Maximized and snapped windows use the rest of the screen. Drag its inner edge to change its width.",
+            ),
+        )
+        .when(crate::appbar::SUPPORTED),
+        RowText::new(
             gettext(locale, "Free size and snapping"),
             gettext(
                 locale,
@@ -2060,7 +2068,29 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                     }
                 });
             });
-            filtered_row(ui, &palette, &needle, &mini_player, &mini_rows[8], |ui| {
+            if crate::appbar::SUPPORTED {
+                filtered_row(ui, &palette, &needle, &mini_player, &mini_rows[8], |ui| {
+                    use crate::appbar::DockEdge;
+                    let current = app.settings.winamp_dock;
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 6.0;
+                        for (edge, label) in [
+                            (DockEdge::Off, gettext(locale, "Off")),
+                            (DockEdge::Left, gettext(locale, "Left")),
+                            (DockEdge::Right, gettext(locale, "Right")),
+                        ] {
+                            if theme::soft_button(ui, &palette, None, &label, edge == current)
+                                .clicked()
+                                && edge != current
+                            {
+                                app.settings.winamp_dock = edge;
+                                app.actions.push(Action::SettingsChanged);
+                            }
+                        }
+                    });
+                });
+            }
+            filtered_row(ui, &palette, &needle, &mini_player, &mini_rows[9], |ui| {
                 let label = gettext(locale, "Free size and snapping");
                 if widgets::switch(ui, &palette, &label, &mut app.settings.winamp_free_size)
                     .changed()

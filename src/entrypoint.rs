@@ -704,12 +704,15 @@ pub(crate) fn run() -> eframe::Result<()> {
             }
             app.attach(&cc.egui_ctx);
             #[cfg(windows)]
-            if square_corners {
+            {
                 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
                 if let Ok(handle) = cc.window_handle()
                     && let RawWindowHandle::Win32(window) = handle.as_raw()
                 {
-                    spotifast::window::square_corners(window.hwnd.get());
+                    app.native_window = Some(window.hwnd.get());
+                    if square_corners {
+                        spotifast::window::square_corners(window.hwnd.get());
+                    }
                 }
             }
             #[cfg(windows)]
@@ -776,7 +779,8 @@ impl MiniWindow {
             },
             on_top: app.settings.winamp_on_top,
             taskbar: app.settings.winamp_show_taskbar,
-            free: app.settings.winamp_free_size && app.winamp.skin.wmp.is_none(),
+            free: (app.settings.winamp_free_size || app.winamp_docks())
+                && app.winamp.skin.wmp.is_none(),
             storage_path: app.dirs.cache.join("winamp.ron"),
         })
     }
@@ -1614,6 +1618,9 @@ impl eframe::App for Shell {
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         let app = &mut *self.app;
+        // The strip goes back to the other windows with this window.
+        app.winamp.dock.release();
+        app.native_window = None;
         app.save_state();
         app.flush_files();
     }
