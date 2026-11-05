@@ -26,10 +26,11 @@ const TITLE: &str = "MILKDROP";
 
 /// The panel, its top left at the view's origin. Returns whether it moves by
 /// itself.
-pub(super) fn show(app: &mut App, view: &mut View, focused: bool) -> bool {
+/// `height` is in skin pixels; a free-size window sets it itself and has no
+/// `grip`, since its own edges resize it.
+pub(super) fn show(app: &mut App, view: &mut View, focused: bool, height: u32, grip: bool) -> bool {
     let ctx = view.ui.ctx().clone();
     let width = layout::WINDOW_WIDTH;
-    let height = super::clamped_panel(app.settings.milkdrop_panel_height);
     read_keys(app, &ctx);
 
     // What the frame's sprites leave over between them.
@@ -89,7 +90,9 @@ pub(super) fn show(app: &mut App, view: &mut View, focused: bool) -> bool {
     {
         app.actions.push(Action::MilkdropFullscreen);
     }
-    grip(app, view, width, height);
+    if grip {
+        self::grip(app, view, width, height);
+    }
     moving
 }
 

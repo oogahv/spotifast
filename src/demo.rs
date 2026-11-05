@@ -1722,6 +1722,21 @@ pub fn apply_flags(app: &mut App, page: Option<&str>, show: Option<&str>) {
                     app.winamp.tap.push(&demo_sound(), 1.0);
                 }
             }
+            // A free-size Winamp window; give it after `winamp`, and size
+            // the shot with `--demo-size`.
+            "winamp-free" => {
+                app.settings.winamp_free_size = true;
+            }
+            // `winamp-free=WIDTHxHEIGHT`: the size it was left at, in points.
+            surface if surface.starts_with("winamp-free=") => {
+                app.settings.winamp_free_size = true;
+                let size = &surface["winamp-free=".len()..];
+                if let Some((width, height)) = size.split_once('x')
+                    && let (Ok(width), Ok(height)) = (width.parse(), height.parse())
+                {
+                    app.settings.winamp_free_window = Some([width, height]);
+                }
+            }
             surface if surface.starts_with("wmp-run=") => {
                 // `|` stands for the comma that separates surfaces.
                 let script = surface["wmp-run=".len()..].replace('|', ",");

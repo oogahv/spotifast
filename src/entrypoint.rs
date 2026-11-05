@@ -640,6 +640,10 @@ pub(crate) fn run() -> eframe::Result<()> {
         #[cfg(not(feature = "demo"))]
         let options = native_options(false, mini, None, geometry);
         let options = profile_options(options, window_file.clone());
+        // Only the mini player is borderless; a pixel skin keeps square
+        // corners rather than Windows 11's rounded ones.
+        #[cfg(windows)]
+        let square_corners = options.viewport.decorations == Some(false);
         #[cfg(windows)]
         let thumbbar_enabled = desktop_surfaces && options.viewport.taskbar != Some(false);
         #[cfg(target_os = "linux")]
@@ -700,6 +704,15 @@ pub(crate) fn run() -> eframe::Result<()> {
             }
             app.attach(&cc.egui_ctx);
             #[cfg(windows)]
+            if square_corners {
+                use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+                if let Ok(handle) = cc.window_handle()
+                    && let RawWindowHandle::Win32(window) = handle.as_raw()
+                {
+                    spotifast::window::square_corners(window.hwnd.get());
+                }
+            }
+            #[cfg(windows)]
             let thumbbar = {
                 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
                 let mut toolbar = spotifast::thumbbar::ThumbBar::new();
@@ -748,6 +761,8 @@ struct MiniWindow {
     geometry: Geometry,
     on_top: bool,
     taskbar: bool,
+    /// The classic skin resizes freely and snaps (`winamp_free_size`).
+    free: bool,
     storage_path: std::path::PathBuf,
 }
 
@@ -761,6 +776,7 @@ impl MiniWindow {
             },
             on_top: app.settings.winamp_on_top,
             taskbar: app.settings.winamp_show_taskbar,
+            free: app.settings.winamp_free_size && app.winamp.skin.wmp.is_none(),
             storage_path: app.dirs.cache.join("winamp.ron"),
         })
     }
@@ -874,12 +890,19 @@ fn native_options(
             let viewport = viewport
                 .with_decorations(false)
                 .with_transparent(true)
-                .with_resizable(false)
-                .with_maximize_button(false)
+                .with_resizable(mini.free)
+                .with_maximize_button(mini.free)
                 .with_inner_size(mini.size)
-                .with_min_inner_size(mini.size)
-                .with_max_inner_size(mini.size)
                 .with_window_level(level);
+            let viewport = if mini.free {
+                viewport
+                    .with_min_inner_size(spotifast::ui::winamp::FREE_MIN_SIZE)
+                    .with_max_inner_size(egui::vec2(16384.0, 16384.0))
+            } else {
+                viewport
+                    .with_min_inner_size(mini.size)
+                    .with_max_inner_size(mini.size)
+            };
             // egui applies this native attribute on Windows only; the app
             // creator asks X11 itself (window::skip_x11_taskbar).
             let viewport = viewport.with_taskbar(mini.taskbar);
@@ -1002,6 +1025,7 @@ mod native_window_tests {
                 geometry: Geometry::default(),
                 on_top: false,
                 taskbar: true,
+                free: false,
                 storage_path: mini_path.clone(),
             }),
             None,
@@ -1063,6 +1087,7 @@ mod native_window_tests {
             },
             on_top: false,
             taskbar: true,
+            free: false,
             storage_path: "cache/winamp.ron".into(),
         };
         let options = native_options(false, Some(mini), None, Geometry::default());
@@ -1092,6 +1117,7 @@ mod native_window_tests {
                     },
                     on_top: false,
                     taskbar: true,
+                    free: false,
                     storage_path: std::path::PathBuf::from("cache/winamp.ron"),
                 }),
                 None,
@@ -1134,6 +1160,7 @@ mod native_window_tests {
             geometry: Geometry::default(),
             on_top: false,
             taskbar: true,
+            free: false,
             storage_path: "cache/winamp.ron".into(),
         };
         assert!(
@@ -1154,6 +1181,7 @@ mod native_window_tests {
                 },
                 on_top: true,
                 taskbar,
+                free: false,
                 storage_path: "cache/winamp.ron".into(),
             };
             let options = native_options(false, Some(mini), None, Geometry::default());
@@ -1264,6 +1292,7 @@ mod native_window_tests {
                 geometry: Geometry::default(),
                 on_top: false,
                 taskbar: true,
+                free: false,
                 storage_path: cache.join("winamp.ron"),
             }),
         ] {

@@ -64,6 +64,26 @@ fn no_window_body(
 
 /// Minimize the active window without leaving egui's macOS viewport flag stale
 /// when the user later restores it from the Dock.
+/// Asks Windows 11 not to round this window's corners. Earlier versions
+/// never round them and ignore the request.
+#[cfg(windows)]
+pub fn square_corners(hwnd: isize) {
+    use windows_sys::Win32::Graphics::Dwm::{
+        DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND, DwmSetWindowAttribute,
+    };
+    let preference = DWMWCP_DONOTROUND;
+    // SAFETY: the handle is this process's live window and the value is the
+    // size the attribute takes.
+    unsafe {
+        DwmSetWindowAttribute(
+            hwnd as _,
+            DWMWA_WINDOW_CORNER_PREFERENCE as u32,
+            (&raw const preference).cast(),
+            std::mem::size_of_val(&preference) as u32,
+        );
+    }
+}
+
 pub fn minimize_window(ctx: &egui::Context) {
     #[cfg(target_os = "macos")]
     {

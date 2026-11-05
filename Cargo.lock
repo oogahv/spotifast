@@ -2907,7 +2907,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.61.2",
+ "windows-core 0.62.2",
 ]
 
 [[package]]
@@ -6192,6 +6192,7 @@ dependencies = [
  "base64 0.22.1",
  "cc",
  "clap",
+ "cpal",
  "ctr",
  "directories",
  "eframe",
@@ -6270,6 +6271,7 @@ dependencies = [
  "tokio-tungstenite",
  "unicode-bidi",
  "urlencoding",
+ "wasapi",
  "windows-native-keyring-store",
  "windows-sys 0.60.2",
  "winit",
@@ -7209,6 +7211,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bfa7760aed19e106de2c7c0b581b509f2f25d3dacaf737cb82ac61bc6d760b0e"
 dependencies = [
  "try-lock",
+]
+
+[[package]]
+name = "wasapi"
+version = "0.26.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1b5f8804a710cf7a18b07610225abb127e562f3249a1f3ed88a6f045c5444910"
+dependencies = [
+ "log",
+ "num-integer",
+ "thiserror 2.0.20",
+ "windows 0.62.2",
+ "windows-core 0.62.2",
 ]
 
 [[package]]

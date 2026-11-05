@@ -1874,6 +1874,13 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                 "Winamp and Windows Media Player skins are both kept here.",
             ),
         ),
+        RowText::new(
+            gettext(locale, "Free size and snapping"),
+            gettext(
+                locale,
+                "Resize a Winamp skin to any size by its edges, and snap it to screen edges and snap layouts like other windows. The skin fills the width and MilkDrop fills the height. Pixels may be slightly uneven at sizes between whole numbers.",
+            ),
+        ),
     ];
     if section_matches(&needle, &mini_player, &mini_rows) {
         any_visible = true;
@@ -2053,6 +2060,14 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                     }
                 });
             });
+            filtered_row(ui, &palette, &needle, &mini_player, &mini_rows[8], |ui| {
+                let label = gettext(locale, "Free size and snapping");
+                if widgets::switch(ui, &palette, &label, &mut app.settings.winamp_free_size)
+                    .changed()
+                {
+                    app.actions.push(Action::SettingsChanged);
+                }
+            });
             filtered_row(ui, &palette, &needle, &mini_player, &mini_rows[5], |ui| {
                 ui.add_enabled_ui(app.window_level_supported, |ui| {
                     let mut on_top = app.settings.winamp_on_top && app.window_level_supported;
@@ -2104,6 +2119,14 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
             )
             .to_owned(),
         ),
+        RowText::new(
+            gettext(locale, "Listen to"),
+            gettext(
+                locale,
+                "What MilkDrop and the mini player's bars react to: Spotifast only, Spotifast plus one other program such as FL Studio, or everything your speakers play. Name the program by its .exe, such as FL64.exe; it needs Windows 10 version 2004 or later.",
+            ),
+        )
+        .when(crate::loopback::SUPPORTED),
         RowText::new(
             gettext(locale, "Presets"),
             match count {
@@ -2183,19 +2206,72 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                     app.actions.push(Action::ToggleWinampMilkdrop);
                 }
             });
+            filtered_row(ui, &palette, &needle, "MilkDrop", &milkdrop_rows[1], |ui| {
+                use crate::settings::VisSource;
+                let current = app.settings.visualize_source;
+                let mut chosen = current;
+                ui.vertical(|ui| {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 6.0;
+                        for (source, label) in [
+                            (VisSource::Player, gettext(locale, "Spotifast")),
+                            (VisSource::PlayerAndApp, gettext(locale, "+ an app")),
+                            (VisSource::AllSound, gettext(locale, "All sound")),
+                        ] {
+                            if theme::soft_button(ui, &palette, None, &label, source == current)
+                                .clicked()
+                            {
+                                chosen = source;
+                            }
+                        }
+                    });
+                    if current == VisSource::PlayerAndApp {
+                        ui.add_space(6.0);
+                        let response = Frame::new()
+                            .fill(palette.surface)
+                            .corner_radius(CornerRadius::same(6))
+                            .inner_margin(Margin::symmetric(10, 6))
+                            .show(ui, |ui| {
+                                widgets::text_edit(
+                                    ui,
+                                    locale,
+                                    egui::TextEdit::singleline(&mut app.settings.visualize_app)
+                                        .font(theme::regular(14.0))
+                                        .frame(egui::Frame::NONE)
+                                        .hint_text("FL64.exe")
+                                        .desired_width(160.0),
+                                )
+                            })
+                            .inner;
+                        if response.changed() {
+                            crate::loopback::apply(
+                                &app.winamp.tap,
+                                current,
+                                &app.settings.visualize_app,
+                            );
+                            changed = true;
+                        }
+                    }
+                });
+                if chosen != current {
+                    app.settings.visualize_source = chosen;
+                    crate::loopback::apply(&app.winamp.tap, chosen, &app.settings.visualize_app);
+                    changed = true;
+                }
+            });
             let downloading = app.winamp.presets.downloading();
             filtered_row(
                 ui,
                 &palette,
                 &needle,
                 "MilkDrop",
-                &milkdrop_rows[1],
+                &milkdrop_rows[2],
                 |_ui| {},
             );
             // Three buttons are wider than a row's control slot; they get a
             // line of their own under the words.
-            if milkdrop_rows[1].matches(&needle, "MilkDrop")
-                || milkdrop_rows[5].matches(&needle, "MilkDrop")
+            if milkdrop_rows[2].matches(&needle, "MilkDrop")
+                || milkdrop_rows[6].matches(&needle, "MilkDrop")
             {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
@@ -2229,7 +2305,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                 });
                 ui.add_space(10.0);
             }
-            filtered_row(ui, &palette, &needle, "MilkDrop", &milkdrop_rows[2], |ui| {
+            filtered_row(ui, &palette, &needle, "MilkDrop", &milkdrop_rows[3], |ui| {
                 let mut seconds = app.settings.milkdrop_seconds.clamp(2, 300);
                 let changed = setting_slider(
                     ui,
@@ -2244,14 +2320,14 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                     app.actions.push(Action::SetMilkdropSeconds(seconds));
                 }
             });
-            filtered_row(ui, &palette, &needle, "MilkDrop", &milkdrop_rows[3], |ui| {
+            filtered_row(ui, &palette, &needle, "MilkDrop", &milkdrop_rows[4], |ui| {
                 if let Some(rate) =
                     frame_rate_dial(ui, &palette, locale, screen_hz, app.settings.milkdrop_fps)
                 {
                     app.actions.push(Action::SetMilkdropFps(rate));
                 }
             });
-            filtered_row(ui, &palette, &needle, "MilkDrop", &milkdrop_rows[4], |ui| {
+            filtered_row(ui, &palette, &needle, "MilkDrop", &milkdrop_rows[5], |ui| {
                 let current = app.settings.milkdrop_scale.max(1);
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;

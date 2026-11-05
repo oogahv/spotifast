@@ -91,6 +91,12 @@ pub fn window_size(settings: &crate::settings::Settings, unit: f32) -> Vec2 {
 /// A first guess at the window's size, before the display's scale is
 /// known; the first frame corrects it.
 pub fn initial_size(settings: &crate::settings::Settings, skin: &Skin) -> Vec2 {
+    if settings.winamp_free_size
+        && skin.wmp.is_none()
+        && let Some([width, height]) = settings.winamp_free_window
+    {
+        return vec2(width, height).max(FREE_MIN);
+    }
     let unit = WinampState::scale(settings, 1.0, skin) as f32;
     match &skin.wmp {
         Some(wmp) => vec2(wmp.width as f32, wmp.height as f32) * unit,
@@ -137,6 +143,147 @@ fn fit_window(ctx: &egui::Context, wanted: Vec2) {
     ctx.send_viewport_cmd(ViewportCommand::MinInnerSize(wanted));
     ctx.send_viewport_cmd(ViewportCommand::MaxInnerSize(wanted));
     ctx.send_viewport_cmd(ViewportCommand::InnerSize(wanted));
+}
+
+/// The smallest a free-size window gets, in logical points: half a skin
+/// at one point per pixel.
+pub const FREE_MIN_SIZE: Vec2 = FREE_MIN;
+const FREE_MIN: Vec2 = vec2(
+    layout::WINDOW_WIDTH as f32 / 2.0,
+    layout::SHADE_HEIGHT as f32,
+);
+/// How close to a free-size window's edge the pointer resizes it, in points.
+const FREE_EDGE: f32 = 5.0;
+
+/// Where a free-size window draws its skin.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct FreeLayout {
+    /// Points per skin pixel, which need not be whole.
+    pub unit: f32,
+    /// How far the skin starts from the window's left edge, when the window
+    /// is too short for a skin as wide as itself.
+    pub left: f32,
+    /// The docked MilkDrop panel's height in skin pixels, when it is open:
+    /// whatever is left under the other windows.
+    pub panel: Option<u32>,
+}
+
+/// Fits the skin into a free-size window `size` (in points): as wide as the
+/// window, or narrower and centred when the window is too short for that.
+/// `base` is the stack's height without MilkDrop, in skin pixels.
+pub(crate) fn free_layout(size: Vec2, base: u32, milkdrop: bool) -> FreeLayout {
+    let width = layout::WINDOW_WIDTH as f32;
+    let needed = base + if milkdrop { generic::MIN_HEIGHT } else { 0 };
+    let unit = (size.x / width)
+        .min(size.y / needed.max(1) as f32)
+        .max(0.01);
+    let panel = milkdrop.then(|| {
+        ((size.y / unit).floor() as u32)
+            .saturating_sub(base)
+            .max(generic::MIN_HEIGHT)
+    });
+    FreeLayout {
+        unit,
+        left: ((size.x - width * unit) / 2.0).max(0.0),
+        panel,
+    }
+}
+
+/// Lets the window resize, maximize and snap, or locks it to the skin
+/// again, once per change.
+fn free_window(ctx: &egui::Context, free: bool) {
+    let id = Id::new("winamp-free-window");
+    let applied: Option<bool> = ctx.data(|data| data.get_temp(id));
+    if applied == Some(free) {
+        return;
+    }
+    ctx.data_mut(|data| data.insert_temp(id, free));
+    if free {
+        ctx.send_viewport_cmd(ViewportCommand::MinInnerSize(FREE_MIN));
+        ctx.send_viewport_cmd(ViewportCommand::MaxInnerSize(vec2(16384.0, 16384.0)));
+        ctx.send_viewport_cmd(ViewportCommand::Resizable(true));
+        ctx.send_viewport_cmd(ViewportCommand::EnableButtons {
+            close: true,
+            minimized: true,
+            maximize: true,
+        });
+    } else if applied.is_some() {
+        ctx.send_viewport_cmd(ViewportCommand::Maximized(false));
+        ctx.send_viewport_cmd(ViewportCommand::Resizable(false));
+        // `fit_window` sets the skin's size again on this frame.
+        ctx.data_mut(|data| data.remove::<(f64, Vec2)>(Id::new("winamp-fit-asked")));
+    }
+}
+
+/// Keeps the free-size window's size for the next time it opens, once the
+/// pointer lets go, so a resize in progress is not saved at every frame.
+fn remember_free_size(app: &mut App, ctx: &egui::Context, size: Vec2) {
+    if ctx.input(|input| input.pointer.any_down()) {
+        return;
+    }
+    let size = [size.x.round(), size.y.round()];
+    if app.settings.winamp_free_window != Some(size) {
+        app.settings.winamp_free_window = Some(size);
+        app.actions.push(Action::SettingsChanged);
+    }
+}
+
+/// Invisible strips along a free-size window's edges and corners that
+/// resize it. A borderless window has no frame of its own to grab.
+fn resize_edges(ui: &mut Ui, ctx: &egui::Context, area: Rect) {
+    use egui::{CursorIcon as C, ResizeDirection as D};
+    let (e, c) = (FREE_EDGE, FREE_EDGE * 2.0);
+    let (l, t, r, b) = (area.left(), area.top(), area.right(), area.bottom());
+    let zones = [
+        (
+            Rect::from_min_max(pos2(l + c, t), pos2(r - c, t + e)),
+            D::North,
+            C::ResizeNorth,
+        ),
+        (
+            Rect::from_min_max(pos2(l + c, b - e), pos2(r - c, b)),
+            D::South,
+            C::ResizeSouth,
+        ),
+        (
+            Rect::from_min_max(pos2(l, t + c), pos2(l + e, b - c)),
+            D::West,
+            C::ResizeWest,
+        ),
+        (
+            Rect::from_min_max(pos2(r - e, t + c), pos2(r, b - c)),
+            D::East,
+            C::ResizeEast,
+        ),
+        (
+            Rect::from_min_max(pos2(l, t), pos2(l + c, t + c)),
+            D::NorthWest,
+            C::ResizeNorthWest,
+        ),
+        (
+            Rect::from_min_max(pos2(r - c, t), pos2(r, t + c)),
+            D::NorthEast,
+            C::ResizeNorthEast,
+        ),
+        (
+            Rect::from_min_max(pos2(l, b - c), pos2(l + c, b)),
+            D::SouthWest,
+            C::ResizeSouthWest,
+        ),
+        (
+            Rect::from_min_max(pos2(r - c, b - c), pos2(r, b)),
+            D::SouthEast,
+            C::ResizeSouthEast,
+        ),
+    ];
+    for (index, (rect, direction, cursor)) in zones.into_iter().enumerate() {
+        let response = ui
+            .interact(rect, Id::new(("winamp-free-edge", index)), Sense::drag())
+            .on_hover_cursor(cursor);
+        if response.drag_started() {
+            ctx.send_viewport_cmd(ViewportCommand::BeginResize(direction));
+        }
+    }
 }
 
 /// Draws the skin's sprites into the window and reads the pointer against
@@ -354,9 +501,26 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         wmp::show(app, ui);
         return;
     }
-    let unit = unit(app, &ctx);
-    fit_window(&ctx, window_size(&app.settings, unit));
-    let origin = ui.max_rect().min;
+    let free = app.settings.winamp_free_size;
+    free_window(&ctx, free);
+    let area = ctx.viewport_rect();
+    let (unit, origin, free_panel) = if free {
+        let base = {
+            let mut without = app.settings.clone();
+            without.milkdrop_open = false;
+            stack_height(&without)
+        };
+        let fit = free_layout(area.size(), base, docked_milkdrop(&app.settings).is_some());
+        // The skin covers the width; under and beside it is black, as
+        // under Winamp's own windows.
+        ui.painter().rect_filled(area, 0.0, Color32::BLACK);
+        remember_free_size(app, &ctx, area.size());
+        (fit.unit, ui.max_rect().min + vec2(fit.left, 0.0), fit.panel)
+    } else {
+        let unit = unit(app, &ctx);
+        fit_window(&ctx, window_size(&app.settings, unit));
+        (unit, ui.max_rect().min, None)
+    };
     let focused = ctx.input(|input| input.viewport().focused.unwrap_or(true));
     super::keys::handle(app, &ctx);
     for path in dropped_skins(&ctx) {
@@ -442,12 +606,19 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             textures: &textures,
             mask: None,
         };
-        if milkdrop::show(app, &mut below, focused) {
+        let height =
+            free_panel.unwrap_or_else(|| clamped_panel(app.settings.milkdrop_panel_height));
+        if milkdrop::show(app, &mut below, focused, height, free_panel.is_none()) {
             crate::theme::visualiser_frame(&ctx, Some(app.milkdrop_pane_fps()));
         }
     }
     #[cfg(not(feature = "milkdrop"))]
-    let _ = below_y;
+    let _ = (below_y, free_panel);
+
+    // Last, so the edges win over the skin's own buttons under them.
+    if free {
+        resize_edges(view.ui, &ctx, area);
+    }
 
     if vis_moving {
         crate::theme::visualiser_frame(&ctx, app.visualiser_fps());
@@ -1626,6 +1797,27 @@ fn shuffle_repeat(app: &mut App, view: &mut View, now: Option<&NowPlaying>) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_free_window_fills_its_width_and_milkdrop_its_height() {
+        let base = layout::WINDOW_HEIGHT + layout::PLAYLIST_MIN_HEIGHT;
+        // A tall column, as when snapped to a side of the screen.
+        let fit = super::free_layout(vec2(550.0, 2000.0), base, true);
+        assert_eq!(fit.unit, 2.0);
+        assert_eq!(fit.left, 0.0);
+        assert_eq!(fit.panel, Some(1000 - base));
+
+        // Without MilkDrop the skin still takes the width; the rest is empty.
+        let fit = super::free_layout(vec2(550.0, 2000.0), base, false);
+        assert_eq!((fit.unit, fit.panel), (2.0, None));
+
+        // Too short for that width: narrower, and centred.
+        let short = (base + generic::MIN_HEIGHT) as f32;
+        let fit = super::free_layout(vec2(1100.0, short), base, true);
+        assert_eq!(fit.unit, 1.0);
+        assert_eq!(fit.left, (1100.0 - layout::WINDOW_WIDTH as f32) / 2.0);
+        assert_eq!(fit.panel, Some(generic::MIN_HEIGHT));
+    }
+
     use super::*;
 
     fn now(title: &str, subtitle: &str, duration_ms: u32) -> NowPlaying {

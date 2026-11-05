@@ -258,6 +258,30 @@ impl SlowAppBanner {
     pub const MAX_DISMISSALS: u8 = 3;
 }
 
+/// What MilkDrop and the analysers listen to.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VisSource {
+    /// Spotifast's own music.
+    #[default]
+    Player,
+    /// Spotifast's music plus one other program, such as FL Studio.
+    PlayerAndApp,
+    /// Everything the speakers play.
+    AllSound,
+}
+
+impl VisSource {
+    pub fn is_player(&self) -> bool {
+        *self == Self::Player
+    }
+}
+
+/// FL Studio's 64-bit program.
+pub fn default_visualize_app() -> String {
+    "FL64.exe".to_owned()
+}
+
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -395,6 +419,14 @@ pub struct Settings {
     /// Screen pixels per skin pixel; `None` picks double size for the
     /// display.
     pub skin_scale: Option<u8>,
+    /// The classic mini player resizes freely and snaps to screen edges and
+    /// snap layouts: the skin scales to the window's width and the docked
+    /// MilkDrop panel fills the height left over.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub winamp_free_size: bool,
+    /// The free-size window's last size in logical points.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub winamp_free_window: Option<[f32; 2]>,
     /// The Winamp window stays above other windows.
     pub winamp_on_top: bool,
     /// The mini player's visualiser: bars, scope, or off.
@@ -441,6 +473,12 @@ pub struct Settings {
     /// MilkDrop rather than the cover's art behind full screen lyrics.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub lyrics_milkdrop: bool,
+    /// What the visualisers listen to (other sources are Windows only).
+    #[serde(default, skip_serializing_if = "VisSource::is_player")]
+    pub visualize_source: VisSource,
+    /// The program "Spotifast + an app" listens to, by its .exe name.
+    #[serde(default = "default_visualize_app")]
+    pub visualize_app: String,
     /// The MilkDrop window's size in logical points, when not full-screen.
     pub milkdrop_size: [f32; 2],
     /// Which proxy to use. Older files without this field stay on `system`.
@@ -570,6 +608,10 @@ impl Default for Settings {
             milkdrop_fullscreen: false,
             milkdrop_panel_height: 232,
             lyrics_milkdrop: false,
+            winamp_free_size: false,
+            winamp_free_window: None,
+            visualize_source: VisSource::Player,
+            visualize_app: default_visualize_app(),
             milkdrop_size: crate::milkdrop::DEFAULT_SIZE,
             proxy_mode: ProxyMode::System,
             proxy: String::new(),

@@ -16,6 +16,16 @@ use librespot_playback::decoder::AudioPacket;
 use librespot_playback::mixer::VolumeGetter;
 use librespot_playback::{NUM_CHANNELS, SAMPLE_RATE};
 
+use crate::settings::VisSource;
+
+/// How recently the player must have pushed for another program's sound to
+/// be mixed into it rather than shown on its own.
+const APP_MIX_WINDOW: Duration = Duration::from_millis(150);
+/// The most of another program's sound kept waiting for the player: a
+/// tenth of a second of stereo. Older sound is dropped, so a clock running
+/// faster than the player's never builds up a delay.
+const APP_KEPT: usize = SAMPLE_RATE as usize / 10 * 2;
+
 /// Half a second of audio.
 const KEPT: usize = SAMPLE_RATE as usize / 2;
 /// How far behind the newest sample the visualiser looks, so that it shows
@@ -55,6 +65,14 @@ const SPEC_SCALE: f32 = 0.5;
 /// child process, when one is running.
 pub struct AudioTap {
     samples: Mutex<VecDeque<f32>>,
+    /// What the visualisers listen to (see `crate::loopback`), as a
+    /// `VisSource` number.
+    source: std::sync::atomic::AtomicU8,
+    /// Another program's stereo sound waiting to be mixed into the player's
+    /// next push, in "Spotifast + an app".
+    app: Mutex<VecDeque<f64>>,
+    /// When the player last pushed sound.
+    player_at: Mutex<Option<Instant>>,
     /// The ring the MilkDrop child reads, attached while its window is open.
     #[cfg(feature = "milkdrop")]
     shm: Mutex<Option<std::sync::Arc<crate::milkdrop::shm::Ring>>>,
@@ -74,6 +92,9 @@ impl Default for AudioTap {
     fn default() -> Self {
         Self {
             samples: Mutex::new(VecDeque::with_capacity(KEPT)),
+            source: std::sync::atomic::AtomicU8::new(0),
+            app: Mutex::new(VecDeque::new()),
+            player_at: Mutex::new(None),
             #[cfg(feature = "milkdrop")]
             shm: Mutex::new(None),
             #[cfg(feature = "milkdrop")]
@@ -102,6 +123,71 @@ impl AudioTap {
     /// Adds scaled stereo samples to the mono analyser buffer and, when
     /// attached, MilkDrop's stereo shared-memory rings.
     pub fn push(&self, interleaved: &[f64], gain: f32) {
+        match self.source() {
+            VisSource::Player => self.record(interleaved, gain),
+            VisSource::AllSound => {}
+            VisSource::PlayerAndApp => {
+                *self.player_at.lock().unwrap_or_else(|p| p.into_inner()) = Some(Instant::now());
+                let mut mixed: Vec<f64> = interleaved.iter().map(|s| s * f64::from(gain)).collect();
+                let mut app = self.app.lock().unwrap_or_else(|p| p.into_inner());
+                let take = app.len().min(mixed.len());
+                for (out, extra) in mixed.iter_mut().zip(app.drain(..take)) {
+                    *out += extra;
+                }
+                drop(app);
+                self.record(&mixed, 1.0);
+            }
+        }
+    }
+
+    /// Chooses what the visualisers listen to.
+    pub fn set_source(&self, source: VisSource) {
+        self.source
+            .store(source as u8, std::sync::atomic::Ordering::Relaxed);
+        self.app.lock().unwrap_or_else(|p| p.into_inner()).clear();
+        self.clear();
+    }
+
+    pub fn source(&self) -> VisSource {
+        match self.source.load(std::sync::atomic::Ordering::Relaxed) {
+            1 => VisSource::PlayerAndApp,
+            2 => VisSource::AllSound,
+            _ => VisSource::Player,
+        }
+    }
+
+    /// Stereo captured from the whole system mix, at the player's rate.
+    pub fn push_system(&self, interleaved: &[f64]) {
+        if self.source() == VisSource::AllSound {
+            self.record(interleaved, 1.0);
+        }
+    }
+
+    /// Stereo captured from one program, at the player's rate. While the
+    /// player is sounding it is mixed into the player's pushes, so the two
+    /// share one timeline; otherwise it goes straight through.
+    pub fn push_app(&self, interleaved: &[f64]) {
+        if self.source() != VisSource::PlayerAndApp {
+            return;
+        }
+        let playing = self
+            .player_at
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .is_some_and(|at| at.elapsed() < APP_MIX_WINDOW);
+        let mut app = self.app.lock().unwrap_or_else(|p| p.into_inner());
+        if playing {
+            app.extend(interleaved.iter().copied());
+            let excess = app.len().saturating_sub(APP_KEPT);
+            app.drain(..excess);
+        } else {
+            app.clear();
+            drop(app);
+            self.record(interleaved, 1.0);
+        }
+    }
+
+    fn record(&self, interleaved: &[f64], gain: f32) {
         let mut samples = self.samples.lock().unwrap_or_else(|p| p.into_inner());
         record_mono(&mut samples, interleaved, gain);
         drop(samples);
@@ -125,6 +211,9 @@ impl AudioTap {
     /// which is better than the sound waiting for the picture.
     #[cfg(target_os = "linux")]
     pub fn try_push(&self, interleaved: &[f64], gain: f32) {
+        if self.source() != VisSource::Player {
+            return;
+        }
         if let Ok(mut samples) = self.samples.try_lock() {
             record_mono(&mut samples, interleaved, gain);
         }
@@ -711,6 +800,35 @@ pub const SCOPE_STEP: usize = 7;
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn each_source_hears_what_it_should() {
+        use crate::settings::VisSource;
+        let tap = AudioTap::new();
+        let loud = [0.5f64; 64];
+        let newest = |tap: &AudioTap| tap.window(1, 0)[0];
+
+        tap.push_system(&loud);
+        tap.push_app(&loud);
+        assert_eq!(newest(&tap), 0.0, "Spotifast only ignores captures");
+        tap.push(&loud, 1.0);
+        assert_eq!(newest(&tap), 0.5);
+
+        tap.set_source(VisSource::AllSound);
+        tap.push(&loud, 1.0);
+        assert_eq!(newest(&tap), 0.0, "the player is already in the mix");
+        tap.push_system(&loud);
+        assert_eq!(newest(&tap), 0.5);
+
+        tap.set_source(VisSource::PlayerAndApp);
+        tap.push_app(&[0.25; 64]);
+        assert_eq!(newest(&tap), 0.25, "the app alone while Spotifast is quiet");
+        tap.push(&[0.0; 64], 1.0);
+        tap.push_app(&[0.25; 64]);
+        assert_eq!(newest(&tap), 0.0, "now waiting for the player's next push");
+        tap.push(&[0.5; 64], 1.0);
+        assert_eq!(newest(&tap), 0.75, "mixed into the player's sound");
+    }
+
     use super::*;
 
     struct RecordedSink(Arc<Mutex<Vec<f64>>>);
