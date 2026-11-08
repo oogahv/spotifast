@@ -180,7 +180,10 @@ fn open(
                     tap.push_system(stereo);
                 }
             },
-            move |error| {
+            move |error: cpal::Error| {
+                if crate::soloist_eq::passing(&error) {
+                    return;
+                }
                 log::warn!("system audio: stream error: {error}");
                 let _ = failed.send(());
             },

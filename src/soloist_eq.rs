@@ -235,6 +235,17 @@ impl Buffer {
     }
 }
 
+/// Whether a stream error is one the stream carries on through: a moment's
+/// gap in the audio (the cable marks one whenever Soloist starts, stops or
+/// stutters), or a reroute it already followed. Rebuilding the route for
+/// these would cut the sound far worse than the gap did.
+pub fn passing(error: &cpal::Error) -> bool {
+    matches!(
+        error.kind(),
+        cpal::ErrorKind::Xrun | cpal::ErrorKind::DeviceChanged
+    )
+}
+
 fn open(
     cable: &cpal::Device,
     speakers: &cpal::Device,
@@ -303,8 +314,12 @@ fn open(
                     .unwrap_or_else(|p| p.into_inner())
                     .push(&work, target, max);
             },
-            move |error| {
-                let _ = in_failed.send(format!("cable: {error}"));
+            move |error: cpal::Error| {
+                if passing(&error) {
+                    log::debug!("soloist eq: cable: {error}");
+                } else {
+                    let _ = in_failed.send(format!("cable: {error}"));
+                }
             },
             None,
         )
@@ -318,8 +333,12 @@ fn open(
                     .unwrap_or_else(|p| p.into_inner())
                     .pull(out, out_channels, target);
             },
-            move |error| {
-                let _ = failed.send(format!("output: {error}"));
+            move |error: cpal::Error| {
+                if passing(&error) {
+                    log::debug!("soloist eq: output: {error}");
+                } else {
+                    let _ = failed.send(format!("output: {error}"));
+                }
             },
             None,
         )
@@ -332,6 +351,14 @@ fn open(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_glitch_does_not_rebuild_the_route_but_a_lost_device_does() {
+        assert!(passing(&cpal::ErrorKind::Xrun.into()));
+        assert!(passing(&cpal::ErrorKind::DeviceChanged.into()));
+        assert!(!passing(&cpal::ErrorKind::DeviceNotAvailable.into()));
+        assert!(!passing(&cpal::ErrorKind::BackendError.into()));
+    }
 
     #[test]
     fn vb_cable_is_recognised_by_its_names() {
