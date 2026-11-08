@@ -710,6 +710,7 @@ pub(crate) fn run() -> eframe::Result<()> {
                     && let RawWindowHandle::Win32(window) = handle.as_raw()
                 {
                     app.native_window = Some(window.hwnd.get());
+                    app.native_window_is_mini = square_corners;
                     if square_corners {
                         spotifast::window::square_corners(window.hwnd.get());
                     }

@@ -359,6 +359,8 @@ struct Immersive {
 pub struct App {
     /// The open window's native handle (Windows `HWND`), for docking it.
     pub native_window: Option<isize>,
+    /// Whether `native_window` is the mini player's window.
+    pub native_window_is_mini: bool,
     pub dirs: AppDirs,
     pub(crate) storage_usage: crate::storage::Usage,
     pub(crate) clearing_audio_cache: bool,
@@ -1221,6 +1223,7 @@ impl App {
             proxy_form_edited: false,
             settings_dirty: false,
             native_window: None,
+            native_window_is_mini: false,
             last_settings_save: Instant::now(),
             backend,
             media_controls,
@@ -14431,15 +14434,17 @@ impl App {
 
     /// Keeps the docked strip as wide as the window, on the window's
     /// monitor, or gives it back.
-    fn sync_dock(&mut self, ctx: &egui::Context) {
+    fn sync_dock(&mut self, _ctx: &egui::Context) {
         let wanted = self.winamp_docks() && !self.window_hidden && !self.switch_intent;
         let edge = if wanted {
             self.settings.winamp_dock
         } else {
             crate::appbar::DockEdge::Off
         };
-        let width = (ctx.viewport_rect().width() * ctx.pixels_per_point()).round() as i32;
-        self.winamp.dock.sync(self.native_window, edge, width);
+        // Only the mini player's own window docks, never the main window
+        // still open on the frame the mini player is chosen.
+        let hwnd = self.native_window.filter(|_| self.native_window_is_mini);
+        self.winamp.dock.sync(hwnd, edge);
     }
 
     /// Follows the open window's size, position and maximized state, so the
