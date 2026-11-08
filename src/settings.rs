@@ -467,6 +467,9 @@ pub struct Settings {
     pub milkdrop_open: bool,
     /// How long each preset plays before the next, in seconds.
     pub milkdrop_seconds: u32,
+    /// Play only presets in the presets folder's Favorites folder.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub milkdrop_favorites_only: bool,
     /// How many frames a second the MilkDrop window draws; 0 is uncapped.
     pub milkdrop_fps: u32,
     /// Last reported MilkDrop screen refresh rate. The first value sets the
@@ -611,6 +614,7 @@ impl Default for Settings {
             winamp_shaded: false,
             milkdrop_open: false,
             milkdrop_seconds: crate::milkdrop::DEFAULT_SECONDS,
+            milkdrop_favorites_only: false,
             milkdrop_fps: crate::milkdrop::DEFAULT_FPS,
             milkdrop_screen_hz: 0,
             milkdrop_scale: 1,

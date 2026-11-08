@@ -1480,6 +1480,15 @@ pub enum Action {
     ToggleWinampMilkdrop,
     /// Move the MilkDrop picture in the skinned window on or back a preset.
     MilkdropEffect(i32),
+    /// Copy a MilkDrop preset into the favorites folder, or take it out.
+    MilkdropFavorite {
+        preset: std::path::PathBuf,
+        on: bool,
+    },
+    /// Play only favorite MilkDrop presets, or all of them.
+    MilkdropFavoritesOnly(bool),
+    /// Open the MilkDrop favorites folder.
+    OpenMilkdropFavorites,
     /// Take the skinned MilkDrop window to full screen, in the plain window.
     MilkdropFullscreen,
     /// MilkDrop alone in the window, from full screen lyrics.

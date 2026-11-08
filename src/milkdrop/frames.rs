@@ -63,9 +63,28 @@ struct Header {
     /// Not zero while the picture holds still, as it does while music is
     /// paused behind full screen lyrics.
     frozen: AtomicU32,
+    /// Not zero to play only favorite presets.
+    favorites_only: AtomicU32,
+    /// The playing preset's path, UTF-8, as a sequence lock: odd while the
+    /// child writes it.
+    preset_sequence: AtomicU64,
+    preset_length: AtomicU32,
+    preset: [AtomicU64; PRESET_WORDS],
 }
 
+/// Room for the playing preset's path, in eight-byte words.
+const PRESET_WORDS: usize = 128;
+
 const _: () = assert!(std::mem::size_of::<Header>() <= HEADER);
+
+/// The first `limit` bytes of `text`, not splitting a character.
+fn truncated(text: &str, limit: usize) -> &[u8] {
+    let mut end = text.len().min(limit);
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    &text.as_bytes()[..end]
+}
 
 fn pack([width, height]: [u32; 2]) -> u64 {
     (u64::from(width) << 32) | u64::from(height)
@@ -209,6 +228,64 @@ impl Frames {
         self.header().beat.load(Ordering::Relaxed)
     }
 
+    /// Asks for only favorite presets, or all of them.
+    pub fn set_favorites_only(&self, on: bool) {
+        self.header()
+            .favorites_only
+            .store(u32::from(on), Ordering::Relaxed);
+    }
+
+    pub fn favorites_only(&self) -> bool {
+        self.header().favorites_only.load(Ordering::Relaxed) != 0
+    }
+
+    /// Says which preset is playing: the child's side.
+    pub fn set_preset(&self, path: &str) {
+        let header = self.header();
+        let bytes = truncated(path, PRESET_WORDS * 8);
+        let sequence = header.preset_sequence.load(Ordering::Relaxed);
+        header
+            .preset_sequence
+            .store(sequence | 1, Ordering::Relaxed);
+        fence(Ordering::Release);
+        for (word, chunk) in header.preset.iter().zip(bytes.chunks(8)) {
+            let mut eight = [0u8; 8];
+            eight[..chunk.len()].copy_from_slice(chunk);
+            word.store(u64::from_le_bytes(eight), Ordering::Relaxed);
+        }
+        header
+            .preset_length
+            .store(bytes.len() as u32, Ordering::Relaxed);
+        fence(Ordering::Release);
+        header
+            .preset_sequence
+            .store((sequence | 1) + 1, Ordering::Release);
+    }
+
+    /// The preset playing, once the child has said: the app's side.
+    pub fn preset(&self) -> Option<String> {
+        let header = self.header();
+        for _ in 0..4 {
+            let before = header.preset_sequence.load(Ordering::Acquire);
+            if before % 2 == 1 {
+                std::hint::spin_loop();
+                continue;
+            }
+            let length =
+                (header.preset_length.load(Ordering::Relaxed) as usize).min(PRESET_WORDS * 8);
+            let mut bytes = Vec::with_capacity(PRESET_WORDS * 8);
+            for word in &header.preset {
+                bytes.extend_from_slice(&word.load(Ordering::Relaxed).to_le_bytes());
+            }
+            fence(Ordering::Acquire);
+            if header.preset_sequence.load(Ordering::Relaxed) == before {
+                bytes.truncate(length);
+                return (length > 0).then(|| String::from_utf8_lossy(&bytes).into_owned());
+            }
+        }
+        None
+    }
+
     /// Takes what the preset has been asked to move by.
     pub fn take_steps(&self) -> i64 {
         self.header().steps.swap(0, Ordering::Relaxed)
@@ -304,6 +381,33 @@ mod tests {
 
     fn file(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!("spotifast-frames-{name}-{}", std::process::id()))
+    }
+
+    #[test]
+    fn the_child_tells_the_app_its_preset_and_takes_favorites_only() {
+        let path = file("preset");
+        let app = Frames::create(&path).unwrap();
+        let child = Frames::open(&path).unwrap();
+        assert_eq!(app.preset(), None, "nothing playing yet");
+        child.set_preset("C:\\presets\\Flexi – Bloom ✶.milk");
+        assert_eq!(
+            app.preset().as_deref(),
+            Some("C:\\presets\\Flexi – Bloom ✶.milk")
+        );
+        child.set_preset("short.milk");
+        assert_eq!(app.preset().as_deref(), Some("short.milk"), "no leftovers");
+        let long = "é".repeat(2000);
+        let shown = app_after(&child, &app, &long);
+        assert!(shown.len() <= PRESET_WORDS * 8 && long.starts_with(&shown));
+        assert!(!child.favorites_only());
+        app.set_favorites_only(true);
+        assert!(child.favorites_only());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    fn app_after(child: &Frames, app: &Frames, preset: &str) -> String {
+        child.set_preset(preset);
+        app.preset().unwrap_or_default()
     }
 
     #[test]

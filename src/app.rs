@@ -4946,6 +4946,14 @@ impl App {
             .map_or(0.0, crate::milkdrop::pane::Stream::glow)
     }
 
+    /// The MilkDrop preset on show in the skin's pane, if any.
+    #[cfg(feature = "milkdrop")]
+    pub fn milkdrop_pane_preset(&self) -> Option<std::path::PathBuf> {
+        self.milkdrop_pane
+            .as_ref()
+            .and_then(|stream| stream.preset())
+    }
+
     /// Starts and stops the pane's child, and hands it the settings.
     #[cfg(feature = "milkdrop")]
     fn sync_milkdrop_pane(&mut self) {
@@ -4962,6 +4970,7 @@ impl App {
             self.milkdrop_behind_lyrics() && !self.now_playing().is_some_and(|now| now.playing);
         if let Some(stream) = &mut self.milkdrop_pane {
             stream.tick(&presets, fps, seconds, frozen);
+            stream.favorites_only(self.settings.milkdrop_favorites_only);
         }
     }
 
@@ -13992,6 +14001,56 @@ impl App {
                 }
                 #[cfg(not(feature = "milkdrop"))]
                 let _ = by;
+            }
+            Action::MilkdropFavorite { preset, on } => {
+                let root = self.dirs.milkdrop_dir();
+                let Some(copy) = crate::milkdrop::favorite_copy(&root, &preset) else {
+                    return;
+                };
+                let name = preset
+                    .file_stem()
+                    .map(|stem| stem.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                // A small file, but still the disk: off the UI thread.
+                let source = preset.clone();
+                std::thread::spawn(move || {
+                    let done = if on {
+                        copy.parent()
+                            .map_or(Ok(()), std::fs::create_dir_all)
+                            .and_then(|()| std::fs::copy(&source, &copy).map(|_| ()))
+                    } else {
+                        std::fs::remove_file(&copy)
+                    };
+                    if let Err(error) = done {
+                        log::warn!("MilkDrop favorite {}: {error}", copy.display());
+                    }
+                });
+                let message = if on {
+                    // Translators: {preset} is a MilkDrop preset's name.
+                    gettext(self.locale, "Added {preset} to favorites")
+                } else {
+                    // Translators: {preset} is a MilkDrop preset's name.
+                    gettext(self.locale, "Removed {preset} from favorites")
+                };
+                self.toast(message.replace("{preset}", &name));
+            }
+            Action::MilkdropFavoritesOnly(on) => {
+                self.settings.milkdrop_favorites_only = on;
+                self.settings_dirty = true;
+                // Straight to a favorite, rather than at the next change.
+                if on {
+                    self.actions.push(Action::MilkdropEffect(1));
+                }
+            }
+            Action::OpenMilkdropFavorites => {
+                let folder = crate::milkdrop::favorites_dir(&self.dirs.milkdrop_dir());
+                std::thread::spawn(move || {
+                    if let Err(error) =
+                        std::fs::create_dir_all(&folder).and_then(|()| crate::opener::open(&folder))
+                    {
+                        log::warn!("could not open {}: {error}", folder.display());
+                    }
+                });
             }
             Action::MilkdropFullscreen => {
                 if self.skin_return || self.lyrics_fullscreen.is_some() {

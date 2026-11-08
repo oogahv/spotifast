@@ -21,6 +21,70 @@ use crate::skin::{Sheet, generic};
 
 use super::View;
 
+/// The right-click menu on the picture: favorite the preset on show, and
+/// choose to play only favorites.
+fn preset_menu(app: &mut App, ui: &mut egui::Ui) {
+    let locale = app.locale;
+    let root = app.dirs.milkdrop_dir();
+    let preset = app.milkdrop_pane_preset();
+    if let Some(preset) = &preset {
+        let name = preset
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        ui.add(egui::Label::new(egui::RichText::new(&name).weak()).truncate());
+        let favorite =
+            crate::milkdrop::favorite_copy(&root, preset).is_some_and(|copy| copy.exists());
+        let label = if favorite {
+            gettext(locale, "★ Remove from favorites")
+        } else {
+            gettext(locale, "☆ Add to favorites")
+        };
+        if ui.button(label.as_ref()).clicked() {
+            app.actions.push(Action::MilkdropFavorite {
+                preset: preset.clone(),
+                on: !favorite,
+            });
+            ui.close();
+        }
+        ui.separator();
+    }
+    if ui.button(gettext(locale, "Next preset").as_ref()).clicked() {
+        app.actions.push(Action::MilkdropEffect(1));
+        ui.close();
+    }
+    let count = std::fs::read_dir(crate::milkdrop::favorites_dir(&root))
+        .map(|entries| {
+            entries
+                .flatten()
+                .filter(|entry| {
+                    entry
+                        .path()
+                        .extension()
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case("milk"))
+                })
+                .count()
+        })
+        .unwrap_or(0);
+    let mut only = app.settings.milkdrop_favorites_only;
+    // Translators: {count} is how many MilkDrop presets are favorites.
+    let label = gettext(locale, "Only favorites ({count})").replace("{count}", &count.to_string());
+    if ui
+        .add_enabled(count > 0 || only, egui::Checkbox::new(&mut only, label))
+        .changed()
+    {
+        app.actions.push(Action::MilkdropFavoritesOnly(only));
+        ui.close();
+    }
+    if ui
+        .button(gettext(locale, "Open favorites folder").as_ref())
+        .clicked()
+    {
+        app.actions.push(Action::OpenMilkdropFavorites);
+        ui.close();
+    }
+}
+
 /// Winamp's frame spells its titles with the skin's own letters.
 const TITLE: &str = "MILKDROP";
 
@@ -53,9 +117,8 @@ pub(super) fn show(app: &mut App, view: &mut View, focused: bool, height: u32, g
     let body = view.interact(inside, "milkdrop-body", Sense::click());
     if body.double_clicked() {
         app.actions.push(Action::MilkdropFullscreen);
-    } else if body.secondary_clicked() {
-        app.actions.push(Action::MilkdropEffect(1));
     }
+    body.context_menu(|ui| preset_menu(app, ui));
     let bar = Area::new(0, 0, width, generic::TOP_HEIGHT);
     let title = view.interact(bar, "milkdrop-title", Sense::click_and_drag());
     if title.drag_started() {

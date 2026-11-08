@@ -189,6 +189,21 @@ impl Stream {
         self.glow
     }
 
+    /// The preset on show, as the child last said.
+    pub fn preset(&self) -> Option<std::path::PathBuf> {
+        match &self.phase {
+            Phase::Running(running) => running.frames.preset().map(Into::into),
+            _ => None,
+        }
+    }
+
+    /// Plays only favorite presets, or all of them.
+    pub fn favorites_only(&self, on: bool) {
+        if let Phase::Running(running) = &self.phase {
+            running.frames.set_favorites_only(on);
+        }
+    }
+
     /// Moves the preset on or back, if a frame is on show; `false` if not,
     /// which leaves the skin's command to the bars.
     pub fn step(&self, by: i32) -> bool {

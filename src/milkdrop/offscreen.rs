@@ -47,6 +47,8 @@ struct Pump {
     /// Rate and preset time from the command line, until the app sets them.
     fps: u32,
     seconds: u32,
+    /// The preset last told to the app.
+    reported: Option<String>,
 }
 
 impl Pump {
@@ -63,6 +65,7 @@ impl Pump {
             due: Instant::now(),
             fps: args.fps,
             seconds: args.seconds,
+            reported: None,
         }
     }
 
@@ -90,6 +93,7 @@ impl Pump {
         if seconds != 0 {
             self.seconds = seconds;
         }
+        self.presets.favorites_only = self.frames.favorites_only();
         let steps = self.frames.take_steps();
         for _ in 0..steps.abs().min(16) {
             if steps > 0 {
@@ -112,6 +116,16 @@ impl Pump {
             &self.ring,
             &mut self.cursor,
         );
+        let playing = self
+            .presets
+            .current()
+            .map(|path| path.to_string_lossy().into_owned());
+        if playing != self.reported {
+            if let Some(path) = &playing {
+                self.frames.set_preset(path);
+            }
+            self.reported = playing;
+        }
         // Nothing to draw for until the app has measured its pane, and
         // nothing worth showing before a preset plays.
         if let Some(size) = self.frames.wanted()

@@ -148,9 +148,53 @@ pub struct Presets {
     /// Random order when true; folder order when false.
     random: bool,
     pending: Option<Request>,
+    /// Play only presets in the favorites folder, when there are any.
+    pub favorites_only: bool,
     /// When the playing preset was asked for, which its time counts from.
     started: Instant,
     download: Option<(&'static str, mpsc::Receiver<Result<usize, String>>)>,
+}
+
+/// The folder, inside the presets folder, that favorites are copied into.
+/// A copy rather than a mark on the original: the file stands on its own,
+/// to keep or share, and a fresh download of the packs keeps it.
+pub const FAVORITES: &str = "Favorites";
+
+/// Whether `path` is a favorite's copy, in the favorites folder.
+pub fn in_favorites(path: &Path) -> bool {
+    path.parent()
+        .and_then(Path::file_name)
+        .is_some_and(|name| name == FAVORITES)
+}
+
+/// The favorites folder for the presets in `root`.
+pub fn favorites_dir(root: &Path) -> PathBuf {
+    root.join(FAVORITES)
+}
+
+/// Where `preset`'s favorite copy is, or would be.
+pub fn favorite_copy(root: &Path, preset: &Path) -> Option<PathBuf> {
+    if in_favorites(preset) {
+        return Some(preset.to_path_buf());
+    }
+    preset
+        .file_name()
+        .map(|name| favorites_dir(root).join(name))
+}
+
+/// The presets to choose among: only the favorites when asked and there are
+/// some; otherwise all but the favorites' copies, so a favorite does not
+/// come round twice as often.
+fn candidates(files: &[PathBuf], favorites_only: bool) -> Vec<&PathBuf> {
+    let (favorites, others): (Vec<&PathBuf>, Vec<&PathBuf>) =
+        files.iter().partition(|file| in_favorites(file));
+    if favorites_only && !favorites.is_empty() {
+        favorites
+    } else if others.is_empty() {
+        favorites
+    } else {
+        others
+    }
 }
 
 impl Default for Presets {
@@ -170,6 +214,7 @@ impl Presets {
             locked: false,
             random: true,
             pending: None,
+            favorites_only: false,
             started: Instant::now(),
             download: None,
         }
@@ -272,22 +317,23 @@ impl Presets {
     /// A preset chosen at random, not the one playing when there is a
     /// choice; in sequential order, the one after this one.
     fn pick(&self) -> Option<PathBuf> {
-        if self.files.is_empty() {
+        let candidates = candidates(&self.files, self.favorites_only);
+        if candidates.is_empty() {
             return None;
         }
         let current = self.current();
         if !self.random {
             let next = current
-                .and_then(|path| self.files.iter().position(|file| file == path))
-                .map(|at| (at + 1) % self.files.len())
+                .and_then(|path| candidates.iter().position(|file| *file == path))
+                .map(|at| (at + 1) % candidates.len())
                 .unwrap_or(0);
-            return Some(self.files[next].clone());
+            return Some(candidates[next].clone());
         }
-        let mut index = rand::random_range(0..self.files.len());
-        if self.files.len() > 1 && Some(self.files[index].as_path()) == current {
-            index = (index + 1) % self.files.len();
+        let mut index = rand::random_range(0..candidates.len());
+        if candidates.len() > 1 && Some(candidates[index].as_path()) == current {
+            index = (index + 1) % candidates.len();
         }
-        Some(self.files[index].clone())
+        Some(candidates[index].clone())
     }
 
     fn request(&mut self, smooth: bool) {
@@ -520,6 +566,39 @@ pub fn unpack_presets(zip: &[u8], folder: &Path) -> Result<usize, String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn favorites_only_plays_the_favorites_and_otherwise_skips_their_copies() {
+        let files: Vec<PathBuf> = [
+            "/p/Geiss - Spiral.milk",
+            "/p/Pack/Flexi - Bloom.milk",
+            "/p/Favorites/Flexi - Bloom.milk",
+        ]
+        .map(PathBuf::from)
+        .to_vec();
+        let only = super::candidates(&files, true);
+        assert_eq!(only, vec![&files[2]]);
+        let all = super::candidates(&files, false);
+        assert_eq!(all, vec![&files[0], &files[1]]);
+        // No favorites yet: favorites-only plays everything rather than nothing.
+        let none = super::candidates(&files[..2], true);
+        assert_eq!(none.len(), 2);
+    }
+
+    #[test]
+    fn a_favorite_copy_sits_in_the_favorites_folder() {
+        let root = Path::new("/p");
+        assert_eq!(
+            super::favorite_copy(root, Path::new("/p/Pack/Flexi - Bloom.milk")),
+            Some(PathBuf::from("/p/Favorites/Flexi - Bloom.milk"))
+        );
+        let copy = Path::new("/p/Favorites/Flexi - Bloom.milk");
+        assert_eq!(super::favorite_copy(root, copy), Some(copy.to_path_buf()));
+        assert!(super::in_favorites(copy));
+        assert!(!super::in_favorites(Path::new(
+            "/p/Pack/Flexi - Bloom.milk"
+        )));
+    }
+
     use super::*;
 
     /// Presets that have just started the first of `files`.
