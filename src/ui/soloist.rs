@@ -787,9 +787,10 @@ const VERSION: usize = 2;
 const QUALITY: usize = 3;
 const ACCESS: usize = 4;
 const TURN_OFF: usize = 5;
+const EQ_CABLE: usize = 6;
 
 /// What the Settings section's rows say, for drawing and for searching.
-pub(super) fn rows(app: &App) -> [RowText<'static>; 6] {
+pub(super) fn rows(app: &App) -> [RowText<'static>; 7] {
     let locale = app.locale;
     let enabled = app.settings.soloist_enabled;
     let supported = crate::soloist::install::supported();
@@ -838,6 +839,14 @@ pub(super) fn rows(app: &App) -> [RowText<'static>; 6] {
             ),
         )
         .when(enabled),
+        RowText::new(
+            gettext(locale, "Equalizer through a virtual cable"),
+            gettext(
+                locale,
+                "Install the free VB-Cable, then in Windows sound settings set Soloist's output to CABLE Input. Spotifast plays it on through the equalizer, so only Spotify is equalized.",
+            ),
+        )
+        .when(enabled && crate::soloist_eq::SUPPORTED),
     ]
 }
 
@@ -901,7 +910,7 @@ pub(super) fn settings(
     ui: &mut egui::Ui,
     needle: &str,
     section: &str,
-    rows: &[RowText<'static>; 6],
+    rows: &[RowText<'static>; 7],
 ) {
     let palette = app.palette;
     let locale = app.locale;
@@ -923,6 +932,38 @@ pub(super) fn settings(
     filtered_note(ui, &palette, needle, section, &rows[QUALITY]);
     filtered_row(ui, &palette, needle, section, &rows[ACCESS], |ui| {
         super::settings::spotify_access_control(app, ui);
+    });
+    filtered_row(ui, &palette, needle, section, &rows[EQ_CABLE], |ui| {
+        ui.vertical(|ui| {
+            let label = gettext(locale, "Equalizer through a virtual cable");
+            if super::widgets::switch(ui, &palette, &label, &mut app.settings.soloist_eq_cable).changed()
+            {
+                app.actions.push(Action::SettingsChanged);
+            }
+            if let Some(route) = &app.soloist_eq {
+                use crate::soloist_eq::Status;
+                let note = match route.status() {
+                    Status::Starting => gettext(locale, "Starting…").into_owned(),
+                    Status::NoCable => gettext(locale, "VB-Cable isn't installed.").into_owned(),
+                    Status::CableIsDefault => gettext(
+                        locale,
+                        "Windows is playing everything into the cable. Set your speakers as the default output.",
+                    )
+                    .into_owned(),
+                    Status::Running { output } => {
+                        // Translators: {output} is a sound output, such as Speakers.
+                        gettext(locale, "Playing through the equalizer to {output}.")
+                            .replace("{output}", &output)
+                    }
+                    Status::Failed(error) => error,
+                };
+                ui.label(
+                    egui::RichText::new(note)
+                        .font(theme::regular(12.0))
+                        .color(palette.secondary),
+                );
+            }
+        });
     });
     filtered_row(ui, &palette, needle, section, &rows[TURN_OFF], |ui| {
         if theme::pill_button(ui, &palette, &gettext(locale, "Turn off"), false).clicked() {

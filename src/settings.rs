@@ -287,6 +287,10 @@ pub fn default_visualize_app() -> String {
 pub struct Settings {
     /// Run the optional, separately downloaded Spotify Soloist player.
     pub soloist_enabled: bool,
+    /// Windows: Soloist plays into a virtual cable and Spotifast plays it on
+    /// through the equalizer (`crate::soloist_eq`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub soloist_eq_cable: bool,
     /// The Spotify Connect name other devices see.
     pub device_name: String,
     /// 96, 160, or 320 kbps.
@@ -532,6 +536,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             soloist_enabled: false,
+            soloist_eq_cable: false,
             device_name: "Spotifast".to_string(),
             bitrate: 320,
             normalisation: false,

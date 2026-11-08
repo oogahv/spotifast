@@ -57,6 +57,7 @@ pub mod sink;
 pub mod skin;
 pub mod skin_previews;
 pub mod soloist;
+pub mod soloist_eq;
 pub mod sonos;
 mod storage;
 pub mod system_fonts;

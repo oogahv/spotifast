@@ -359,6 +359,8 @@ struct Immersive {
 pub struct App {
     /// The open window's native handle (Windows `HWND`), for docking it.
     pub native_window: Option<isize>,
+    /// Soloist's equalized route through a virtual cable, while it is on.
+    pub soloist_eq: Option<crate::soloist_eq::Route>,
     /// Whether `native_window` is the mini player's window.
     pub native_window_is_mini: bool,
     pub dirs: AppDirs,
@@ -1223,6 +1225,7 @@ impl App {
             proxy_form_edited: false,
             settings_dirty: false,
             native_window: None,
+            soloist_eq: None,
             native_window_is_mini: false,
             last_settings_save: Instant::now(),
             backend,
@@ -14402,6 +14405,7 @@ impl App {
         self.sync_window_title(ctx);
         self.remember_geometry(ctx);
         self.sync_dock(ctx);
+        self.sync_soloist_eq();
         #[cfg(target_os = "macos")]
         self.sync_notch_widget(ctx);
         #[cfg(target_os = "macos")]
@@ -14420,6 +14424,19 @@ impl App {
     fn note_close_request(&mut self, close_requested: bool, hides_to_tray: bool) {
         if close_requested && !self.quit_requested && !self.switch_intent && hides_to_tray {
             self.hide_intent = true;
+        }
+    }
+
+    /// Starts or stops Soloist's route through the equalizer to match the
+    /// settings.
+    fn sync_soloist_eq(&mut self) {
+        let wanted = crate::soloist_eq::SUPPORTED
+            && self.settings.soloist_enabled
+            && self.settings.soloist_eq_cable;
+        if wanted && self.soloist_eq.is_none() {
+            self.soloist_eq = Some(crate::soloist_eq::Route::start(self.winamp.eq.clone()));
+        } else if !wanted {
+            self.soloist_eq = None;
         }
     }
 

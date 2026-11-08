@@ -206,9 +206,14 @@ pub(crate) struct Converter {
 
 impl Converter {
     pub(crate) fn new(channels: usize, rate: u32) -> Self {
+        Self::between(channels, rate, librespot_playback::SAMPLE_RATE)
+    }
+
+    /// Stereo at `to` hertz from `channels` at `from` hertz.
+    pub(crate) fn between(channels: usize, from: u32, to: u32) -> Self {
         Self {
             channels,
-            step: f64::from(rate.max(1)) / f64::from(librespot_playback::SAMPLE_RATE),
+            step: f64::from(from.max(1)) / f64::from(to.max(1)),
             pos: 0.0,
             last: [0.0; 2],
             out: Vec::with_capacity(8192),
