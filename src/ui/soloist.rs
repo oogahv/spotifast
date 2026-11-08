@@ -952,8 +952,17 @@ pub(super) fn settings(
                     .into_owned(),
                     Status::Running { output } => {
                         // Translators: {output} is a sound output, such as Speakers.
-                        gettext(locale, "Playing through the equalizer to {output}.")
-                            .replace("{output}", &output)
+                        let playing = gettext(locale, "Playing through the equalizer to {output}.")
+                            .replace("{output}", &output);
+                        match route.dropouts() {
+                            0 => playing,
+                            count => format!(
+                                "{playing} {}",
+                                // Translators: {count} is how many times the sound cut out.
+                                gettext(locale, "Dropouts: {count}.")
+                                    .replace("{count}", &count.to_string())
+                            ),
+                        }
                     }
                     Status::Failed(error) => error,
                 };
